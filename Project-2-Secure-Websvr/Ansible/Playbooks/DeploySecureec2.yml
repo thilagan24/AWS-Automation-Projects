@@ -1,0 +1,84 @@
+---
+- name: Deploy Secure ec2 with iam and vpc
+  hosts: localhost
+
+  tasks:
+    - name: create vpc
+      amazon.aws.ec2_vpc_net:
+        name: myVPC
+        cidr_block: 10.0.0.0/16
+        region: us-east-1
+      register: vpc
+
+    - name: create subnet public
+      amazon.aws.ec2_vpc_subnet:
+        cidr: 10.0.1.0/24
+        vpc_id: "{{ vpc.vpc.id }}"
+      register: subnet
+
+    - name: create igw
+      amazon.aws.ec2_vpc_igw:
+        state: present
+        vpc_id: "{{ vpc.vpc.id }}"
+      register: igw
+
+    - name: create routing table
+      amazon.aws.ec2_vpc_route_table:
+        vpc_id: "{{ vpc.vpc.id }}"
+        routes:
+          - dest: 0.0.0.0/0
+            gateway_id: "{{ igw.gateway_id }}"
+        state: present
+        subnets: 
+          - "{{ subnet.subnet.id }}"
+
+    - name: Create IAM Role
+      amazon.aws.iam_role:
+        name: EC2-S3-Role
+        assume_role_policy_document: "{{ lookup('file', 'trust_policy.json') }}"
+        managed_policies:
+          - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+
+    - name: Create IAM Instance Profile
+      amazon.aws.iam_instance_profile:
+        name: EC2-S3-Role-Profile
+        role: EC2-S3-Role
+      register: instance_profile 
+
+    - name: Create Web Security Group
+      amazon.aws.ec2_security_group:
+        name: web-server-sg
+        description: Allow SSH and HTTP
+        vpc_id: "{{ vpc.vpc.id }}"
+        region: us-east-1
+        rules:
+          - proto: tcp
+            from_port: 22
+            to_port: 22
+            cidr_ip: 0.0.0.0/0
+          - proto: tcp
+            from_port: 80
+            to_port: 80
+            cidr_ip: 0.0.0.0/0
+      register: web_sg
+
+    - name: Launch EC2 Instance
+      amazon.aws.ec2_instance:
+        name: "MyWebServer"
+        key_name: MacKey_04032026
+        vpc_subnet_id: "{{ subnet.subnet.id }}"
+        instance_type: t2.micro
+        security_group: "{{ web_sg.group_id }}"
+        network:
+          assign_public_ip: true
+        image_id: ami-02dfbd4ff395f2a1b
+        iam_instance_profile: EC2-S3-Role-Profile
+        region: us-east-1
+        user_data: |
+          #!/bin/bash
+          yum update -y
+          yum install httpd -y
+          systemctl start httpd
+          systemctl enable httpd
+          echo "Hello from AWS EC2" > /var/www/html/index.html
+      register: ec2_info
