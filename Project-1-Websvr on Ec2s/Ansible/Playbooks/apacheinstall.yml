@@ -1,0 +1,14 @@
+---
+- name: Install and Start Apache Web Server
+  hosts: webservers
+  remote_user: ubuntu
+  become: true  # Runs commands with sudo privileges
+
+  tasks:
+    - name: Ensure Apache is at the latest version
+      ansible.builtin.apt:
+        name: apache2
+        update_cache: true. #Update apt repo before installation
+        state: latest
+
+    
